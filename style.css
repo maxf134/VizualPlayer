@@ -1,0 +1,233 @@
+body, html {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background-color: #000;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    color: #fff;
+}
+
+#ui-container {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    z-index: 100;
+    background: rgba(4, 4, 10, 0.9);
+    padding: 20px;
+    border-radius: 14px;
+    backdrop-filter: blur(16px);
+    border: 1px solid rgba(0, 255, 255, 0.4);
+    box-shadow: 0 20px 50px rgba(0,0,0,0.95);
+    width: 340px;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    transition: opacity 0.35s ease, transform 0.35s ease;
+}
+
+.header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+h1 {
+    font-size: 1.1rem;
+    margin: 0;
+    letter-spacing: 1.5px;
+    color: #00ffff;
+    text-transform: uppercase;
+    text-shadow: 0 0 12px rgba(0,255,255,0.7);
+}
+
+.btn-zen-small {
+    background: rgba(0, 255, 255, 0.12);
+    border: 1px solid rgba(0, 255, 255, 0.45);
+    color: #00ffff;
+    padding: 5px 10px;
+    border-radius: 6px;
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: 0.2s;
+}
+
+.btn-zen-small:hover {
+    background: rgba(0, 255, 255, 0.3);
+    box-shadow: 0 0 12px rgba(0, 255, 255, 0.5);
+}
+
+/* Панель dat.gui */
+.dg.ac {
+    z-index: 1000 !important;
+    transition: opacity 0.35s ease;
+}
+
+/* Плавающая кнопка полного экрана в правом нижнем углу */
+#btn-zen-floating {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 1100;
+    background: rgba(6, 6, 14, 0.85);
+    border: 1px solid rgba(0, 255, 255, 0.45);
+    color: #00ffff;
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.7);
+    transition: opacity 0.3s ease, transform 0.2s ease, background 0.2s ease;
+}
+
+#btn-zen-floating:hover {
+    background: rgba(0, 255, 255, 0.25);
+    box-shadow: 0 0 18px rgba(0, 255, 255, 0.6);
+    transform: translateY(-2px);
+    opacity: 1 !important;
+}
+
+/* Состояние полного погружения (скрывает плеер и настройки) */
+body.zen-mode #ui-container {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(-30px);
+}
+
+body.zen-mode .dg.ac {
+    opacity: 0;
+    pointer-events: none;
+}
+
+body.zen-mode #btn-zen-floating {
+    opacity: 0.15;
+}
+
+.btn-upload {
+    display: block;
+    background: linear-gradient(135deg, #00ffff, #0044ff);
+    color: #000;
+    text-align: center;
+    padding: 10px;
+    border-radius: 6px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: 0.2s;
+    margin-bottom: 12px;
+}
+
+.btn-upload:hover {
+    filter: brightness(1.25);
+    transform: translateY(-1px);
+}
+
+.seek-container {
+    margin-bottom: 12px;
+}
+
+#seek-bar {
+    width: 100%;
+    accent-color: #00ffff;
+    cursor: pointer;
+}
+
+.time-info {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.75rem;
+    color: #888;
+}
+
+.player-controls {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.player-controls button {
+    flex: 1;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(0, 255, 255, 0.4);
+    color: #00ffff;
+    padding: 10px 0;
+    border-radius: 6px;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: 0.2s;
+}
+
+.player-controls button:hover {
+    background: rgba(0, 255, 255, 0.3);
+    box-shadow: 0 0 15px rgba(0, 255, 255, 0.6);
+}
+
+.volume-container {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.85rem;
+    color: #ccc;
+    margin-bottom: 15px;
+}
+
+#volume-bar {
+    flex-grow: 1;
+    accent-color: #00ffff;
+    cursor: pointer;
+}
+
+#playlist-container {
+    flex-grow: 1;
+    overflow-y: auto;
+    max-height: 190px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    padding-top: 10px;
+}
+
+#playlist-container h3 {
+    font-size: 0.9rem;
+    margin: 0 0 2px 0;
+    color: #aaa;
+}
+
+.hint {
+    font-size: 0.75rem;
+    color: #555;
+    margin: 0 0 8px 0;
+}
+
+#playlist {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+#playlist li {
+    padding: 8px 10px;
+    margin-bottom: 5px;
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: 0.2s;
+    border-left: 3px solid transparent;
+}
+
+#playlist li:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+#playlist li.active {
+    background: rgba(0, 255, 255, 0.15);
+    border-left-color: #00ffff;
+    color: #00ffff;
+    font-weight: bold;
+}
