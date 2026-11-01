@@ -231,3 +231,34 @@ body.zen-mode #btn-zen-floating {
     color: #00ffff;
     font-weight: bold;
 }
+
+/* Адаптация под мобильные телефоны */
+@media (max-width: 768px) {
+    #ui-container {
+        top: auto;
+        bottom: 12px;
+        left: 10px;
+        right: 10px;
+        width: auto;
+        max-height: 48vh;
+        padding: 14px;
+    }
+
+    #playlist-container {
+        max-height: 90px;
+    }
+
+    #btn-zen-floating {
+        top: 12px;
+        bottom: auto;
+        left: 12px;
+        right: auto;
+        padding: 8px 12px;
+        font-size: 0.78rem;
+    }
+
+    .dg.ac {
+        top: 0 !important;
+        right: 0 !important;
+    }
+}

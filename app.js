@@ -15,6 +15,9 @@ const durationEl = document.getElementById('duration');
 const btnZenInline = document.getElementById('btn-zen-inline');
 const btnZenFloating = document.getElementById('btn-zen-floating');
 
+// Определяем мобильное устройство для оптимизации GPU
+const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
+
 let playlist = [];
 let currentTrackIndex = 0;
 let isPlaying = false;
@@ -37,13 +40,16 @@ function toggleZenFullscreen() {
 
     if (!isCurrentlyZen) {
         setZenUIState(true);
-        if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
-            document.documentElement.requestFullscreen().catch(() => {});
+        const docEl = document.documentElement;
+        const requestFS = docEl.requestFullscreen || docEl.webkitRequestFullscreen || docEl.msRequestFullscreen;
+        if (!document.fullscreenElement && !document.webkitFullscreenElement && requestFS) {
+            requestFS.call(docEl).catch(() => {});
         }
     } else {
         setZenUIState(false);
-        if (document.fullscreenElement && document.exitFullscreen) {
-            document.exitFullscreen().catch(() => {});
+        const exitFS = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
+        if ((document.fullscreenElement || document.webkitFullscreenElement) && exitFS) {
+            exitFS.call(document).catch(() => {});
         }
     }
 }
@@ -51,11 +57,11 @@ function toggleZenFullscreen() {
 if (btnZenInline) btnZenInline.addEventListener('click', toggleZenFullscreen);
 if (btnZenFloating) btnZenFloating.addEventListener('click', toggleZenFullscreen);
 
-// Если пользователь вышел из полноэкранного режима по клавише Esc — возвращаем интерфейс
 document.addEventListener('fullscreenchange', () => {
-    if (!document.fullscreenElement) {
-        setZenUIState(false);
-    }
+    if (!document.fullscreenElement) setZenUIState(false);
+});
+document.addEventListener('webkitfullscreenchange', () => {
+    if (!document.webkitFullscreenElement) setZenUIState(false);
 });
 
 // ============================================================================
@@ -108,17 +114,13 @@ const vizConfig = {
     automaticUberViz: true,
     enable3DLayers: true,
     barsPerSwitch: 8,
-
-    // Главная галочка тряски (включает/выключает точь-в-точь режим с тряской)
     enableShakeAndWobble: true,
-
     cameraTilt: true,
     tiltSpeed: 0.6,
     tiltAmount: 0.35,
     colorPalette: 0,
     speed: 1.0,
 
-    // Все 10 слоев VIZ из архитектуры ÜberViz v0.9.7
     ripples:    { on: true,  opacity: 1.0,  targetOpacity: 1.0,  depth: 140 },
     crystal:    { on: true,  opacity: 0.9,  targetOpacity: 0.9,  freakout: 0.6 },
     tunnel:     { on: false, opacity: 0.0,  targetOpacity: 0.0,  twist: 1.2 },
@@ -149,11 +151,18 @@ const fxConfig = {
     strobeOnBeat: false
 };
 
+// На мобильных уменьшаем число шагов реймарчинга, чтобы компилятор шейдеров не сбрасывал контекст
+const RAY_STEPS = isMobile ? 42 : 70;
+
 // ============================================================================
-// 3. ВСЕ 8 ПОЛНОЭКРАННЫХ GLSL ШЕЙДЕРОВ (С FFT-ТЕКСТУРОЙ И ACES TONE MAPPING)
+// 3. ВСЕ 8 ПОЛНОЭКРАННЫХ GLSL ШЕЙДЕРОВ (С ЗАЩИТОЙ ОТ NaN НА МОБИЛЬНЫХ GPU)
 // ============================================================================
 const backgroundGLSLFragment = `
-    precision highp float;
+    #ifdef GL_FRAGMENT_PRECISION_HIGH
+        precision highp float;
+    #else
+        precision mediump float;
+    #endif
 
     uniform vec2 u_resolution;
     uniform float u_time;
@@ -169,6 +178,20 @@ const backgroundGLSLFragment = `
     uniform sampler2D u_audioTex;
 
     #define PI 3.14159265359
+    #define STEPS ${RAY_STEPS}
+
+    // Безопасные функции для мобильных GPU (исключают появление NaN и черного экрана)
+    float safeAtan(float y, float x) {
+        return atan(y, abs(x) < 0.0001 ? 0.0001 : x);
+    }
+
+    float safePow(float x, float y) {
+        return pow(max(x, 0.0001), y);
+    }
+
+    vec3 safePow3(vec3 x, float y) {
+        return pow(max(x, vec3(0.0001)), vec3(y));
+    }
 
     mat2 rot(float a) {
         float c = cos(a), s = sin(a);
@@ -201,6 +224,7 @@ const backgroundGLSLFragment = `
     }
 
     vec3 acesToneMapping(vec3 x) {
+        x = clamp(x, 0.0, 20.0);
         const float a = 2.51;
         const float b = 0.03;
         const float c = 2.43;
@@ -237,12 +261,12 @@ const backgroundGLSLFragment = `
 
         float t = 0.0;
         bool hit = false;
-        for (int i = 0; i < 80; i++) {
+        for (int i = 0; i < STEPS; i++) {
             vec3 p = ro + rd * t;
             float d = p.y - wavesHeight(p.xz);
-            if (d < 0.008) { hit = true; break; }
-            if (t > 45.0) break;
-            t += d * 0.55;
+            if (d < 0.012) { hit = true; break; }
+            if (t > 42.0) break;
+            t += d * 0.6;
         }
         if (!hit) return skyCol;
 
@@ -256,7 +280,7 @@ const backgroundGLSLFragment = `
 
         vec3 lightDir = normalize(vec3(sin(u_time * 0.3) * 0.5, 0.8, 1.0));
         float diff = max(dot(n, lightDir), 0.0);
-        float fresnel = pow(1.0 - max(dot(n, -rd), 0.0), 3.0);
+        float fresnel = safePow(1.0 - max(dot(n, -rd), 0.0), 3.0);
 
         float colorIndex = p.y * 0.22 + p.z * 0.03 - u_audioTime * 0.08;
         vec3 waveCol = getPalette(colorIndex);
@@ -290,10 +314,10 @@ const backgroundGLSLFragment = `
 
         vec3 accCol = vec3(0.0);
         float t = 0.5;
-        for (int i = 0; i < 64; i++) {
+        for (int i = 0; i < STEPS; i++) {
             vec3 p = ro + rd * t;
             float d = mapOctagrams(p);
-            float glow = 0.008 / (0.015 + abs(d) * abs(d));
+            float glow = 0.008 / (0.015 + d * d);
             vec3 c = getPalette(t * 0.06 + float(i) * 0.015 + u_time * 0.1);
             accCol += c * glow * (0.6 + u_bass * 0.8);
             t += max(abs(d) * 0.55, 0.03);
@@ -347,7 +371,7 @@ const backgroundGLSLFragment = `
     }
 
     vec3 calcNormalFerro(vec3 p) {
-        vec2 e = vec2(0.005, 0.0);
+        vec2 e = vec2(0.006, 0.0);
         return normalize(vec3(
             mapFerrofluid(p + e.xyy) - mapFerrofluid(p - e.xyy),
             mapFerrofluid(p + e.yxy) - mapFerrofluid(p - e.yxy),
@@ -360,20 +384,20 @@ const backgroundGLSLFragment = `
         vec3 rd = normalize(vec3(uv, 1.3));
 
         float rUV = length(uv);
-        float angle = atan(uv.y, uv.x);
+        float angle = safeAtan(uv.y, uv.x);
         float fftRay = sampleFFT(abs(angle) / PI);
         vec3 bgCol = getPalette(rUV + u_time * 0.1) * exp(-rUV * 2.5) * (0.15 + fftRay * 0.35);
 
         float t = 0.0;
         float glow = 0.0;
         bool hit = false;
-        for (int i = 0; i < 70; i++) {
+        for (int i = 0; i < STEPS; i++) {
             vec3 p = ro + rd * t;
             float d = mapFerrofluid(p);
             glow += 0.004 / (0.02 + d * d);
-            if (d < 0.004) { hit = true; break; }
+            if (d < 0.006) { hit = true; break; }
             if (t > 10.0) break;
-            t += d * 0.55;
+            t += d * 0.6;
         }
 
         vec3 col = bgCol + getPalette(u_time * 0.15 + 0.3) * glow * (0.3 + u_bass * 0.5);
@@ -384,8 +408,8 @@ const backgroundGLSLFragment = `
             vec3 l2 = normalize(vec3(-3.0, -2.0, -1.0));
             float diff1 = max(dot(n, l1), 0.0);
             float diff2 = max(dot(n, l2), 0.0);
-            float spec = pow(max(dot(reflect(-l1, n), -rd), 0.0), 32.0);
-            float fresnel = pow(1.0 - max(dot(n, -rd), 0.0), 3.5);
+            float spec = safePow(max(dot(reflect(-l1, n), -rd), 0.0), 32.0);
+            float fresnel = safePow(1.0 - max(dot(n, -rd), 0.0), 3.5);
 
             vec3 baseColor = getPalette(length(p) * 0.5 - u_audioTime * 0.2);
             vec3 rimColor = getPalette(length(p) * 0.5 + 0.4);
@@ -404,7 +428,7 @@ const backgroundGLSLFragment = `
 
         vec3 col = vec3(0.0);
         float t = 0.2;
-        for (int i = 0; i < 64; i++) {
+        for (int i = 0; i < STEPS; i++) {
             vec3 p = ro + rd * t;
             p.x += sin(p.z * 0.18) * 0.6;
             p.y += cos(p.z * 0.18) * 0.6;
@@ -448,11 +472,11 @@ const backgroundGLSLFragment = `
         float t = 0.0;
         vec3 accGlow = vec3(0.0);
         bool hit = false;
-        for (int i = 0; i < 70; i++) {
+        for (int i = 0; i < STEPS; i++) {
             vec3 p = ro + rd * t;
             float d = mapGyroid(p);
             accGlow += getPalette(p.z * 0.08 + u_time * 0.1) * (0.003 / (0.02 + d * d));
-            if (d < 0.006) { hit = true; break; }
+            if (d < 0.008) { hit = true; break; }
             if (t > 25.0) break;
             t += d * 0.6;
         }
@@ -477,7 +501,7 @@ const backgroundGLSLFragment = `
     // --- 6. SOUNDECLIPSE SPECTRUM ---
     vec3 renderSoundEclipse(vec2 uv) {
         float r = length(uv);
-        float a = atan(uv.y, uv.x);
+        float a = safeAtan(uv.y, uv.x);
         float normAngle = abs(a) / PI;
 
         float fft = sampleFFT(normAngle * 0.85);
@@ -524,7 +548,7 @@ const backgroundGLSLFragment = `
         float t = 0.0;
         vec3 glowAcc = vec3(0.0);
 
-        for (int i = 0; i < 75; i++) {
+        for (int i = 0; i < STEPS; i++) {
             vec3 p = ro + rd * t;
             float roadMask = smoothstep(0.8, 1.8, abs(p.x));
             vec2 cellId = floor(p.xz * 0.8);
@@ -543,8 +567,8 @@ const backgroundGLSLFragment = `
             float roofGlow = 0.003 / (0.015 + dBuilding * dBuilding);
             glowAcc += getPalette(rnd + fftBin * 0.5 + u_time * 0.05) * roofGlow * (0.3 + fftBin * 1.2);
 
-            if (d < 0.01 || t > 40.0) break;
-            t += min(max(d * 0.5, 0.04), 0.35);
+            if (d < 0.015 || t > 40.0) break;
+            t += min(max(d * 0.55, 0.05), 0.4);
         }
         return col + glowAcc * 0.45;
     }
@@ -555,7 +579,7 @@ const backgroundGLSLFragment = `
             return;
         }
 
-        vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / min(u_resolution.x, u_resolution.y);
+        vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / max(min(u_resolution.x, u_resolution.y), 1.0);
 
         vec3 col = vec3(0.0);
         if (u_mode == 0) col = renderCyberWaves(uv);
@@ -568,9 +592,9 @@ const backgroundGLSLFragment = `
         else if (u_mode == 7) col = renderCyberCity(uv);
 
         col = acesToneMapping(col);
-        col = pow(col, vec3(0.92));
+        col = safePow3(col, 0.92);
 
-        gl_FragColor = vec4(col * u_opacity, 1.0);
+        gl_FragColor = vec4(clamp(col * u_opacity, 0.0, 1.0), 1.0);
     }
 `;
 
@@ -595,6 +619,9 @@ function createAudioDataTexture() {
     );
     audioTexture.magFilter = THREE.LinearFilter;
     audioTexture.minFilter = THREE.LinearFilter;
+    audioTexture.wrapS = THREE.ClampToEdgeWrapping;
+    audioTexture.wrapT = THREE.ClampToEdgeWrapping;
+    audioTexture.generateMipmaps = false;
     audioTexture.needsUpdate = true;
 }
 
@@ -746,12 +773,13 @@ function buildSceneAndLayers() {
         fragmentShader: `
             varying vec2 vUv; uniform float u_time, u_bass, u_mid, u_radius, u_brightness, u_opacity; uniform vec3 u_color1, u_color2;
             void main() {
-                float r = length(vUv); float a = atan(vUv.y, vUv.x);
+                float r = length(vUv);
+                float a = atan(vUv.y, abs(vUv.x) < 0.0001 ? 0.0001 : vUv.x);
                 float rad = u_radius + u_bass * 0.08;
                 float flare = sin(a * 12.0 + u_time * 3.0) * cos(a * 7.0 - u_time * 2.0) * (0.02 + u_mid * 0.05);
                 float corona = (0.018 * u_brightness) / (abs(r - (rad + flare)) + 0.008) * smoothstep(rad - 0.04, rad, r);
                 vec3 col = mix(u_color1, u_color2, 0.5 + 0.5 * sin(a * 3.0 + u_time));
-                gl_FragColor = vec4(col * corona * u_opacity, clamp(corona * u_opacity, 0.0, 1.0));
+                gl_FragColor = vec4(clamp(col * corona * u_opacity, 0.0, 2.0), clamp(corona * u_opacity, 0.0, 1.0));
             }
         `
     });
@@ -827,21 +855,22 @@ function buildSceneAndLayers() {
                 vec3 ro = vec3(0.0, 2.2, u_time * 3.0);
                 vec3 rd = normalize(vec3(vUv.x * 1.3, vUv.y - 0.15, 1.3));
                 float t = 0.0; bool hit = false;
-                for (int i = 0; i < 64; i++) {
+                for (int i = 0; i < 45; i++) {
                     vec3 p = ro + rd * t;
                     float d = p.y - hMap(p.xz);
-                    if (d < 0.01) { hit = true; break; }
+                    if (d < 0.012) { hit = true; break; }
                     if (t > 40.0) break;
-                    t += d * 0.55;
+                    t += d * 0.6;
                 }
                 if (!hit) discard;
                 vec3 p = ro + rd * t; vec2 e = vec2(0.04, 0.0);
                 vec3 n = normalize(vec3(hMap(p.xz-e.xy)-hMap(p.xz+e.xy), 2.0*e.x, hMap(p.xz-e.yx)-hMap(p.xz+e.yx)));
                 float diff = max(dot(n, normalize(vec3(0.3, 0.8, 1.0))), 0.0);
-                float fres = pow(1.0 - max(dot(n, -rd), 0.0), 3.0);
+                float fresBase = max(1.0 - max(dot(n, -rd), 0.0), 0.0001);
+                float fres = fresBase * fresBase * fresBase;
                 vec3 c = pal(p.y * 0.22 + p.z * 0.03 - u_time * 0.08) * (0.3 + diff * 0.7) + pal(p.y * 0.2 + 0.35) * fres * 0.8;
                 float fog = exp(-t * 0.05);
-                gl_FragColor = vec4(c * fog * u_opacity, fog * u_opacity);
+                gl_FragColor = vec4(clamp(c * fog * u_opacity, 0.0, 1.0), fog * u_opacity);
             }
         `
     });
@@ -866,7 +895,7 @@ function buildSceneAndLayers() {
                 float n2 = cos(p.x * 3.5 - u_time * 0.9 + p.y * 2.5);
                 float leak = smoothstep(0.2, 0.95, (n1 + n2) * 0.5 + u_bass * 0.35 * u_freak);
                 vec3 col = mix(vec3(1.0, 0.1, 0.5), vec3(0.0, 0.8, 1.0), 0.5 + 0.5 * sin(u_time * 0.4 + p.x));
-                gl_FragColor = vec4(col * leak * u_opacity * 0.55, 1.0);
+                gl_FragColor = vec4(clamp(col * leak * u_opacity * 0.55, 0.0, 1.0), 1.0);
             }
         `
     });
@@ -878,7 +907,7 @@ function buildSceneAndLayers() {
 }
 
 // ============================================================================
-// 5. КАСКАД ПОСТ-ОБРАБОТКИ FX RACK (ДВА РЕЖИМА: С ТРЯСКОЙ ТОЧЬ-В-ТОЧЬ И БЕЗ)
+// 5. КАСКАД ПОСТ-ОБРАБОТКИ FX RACK (ЗАЩИТА ОТ NaN В KALEIDOSCOPE НА МОБИЛЬНЫХ)
 // ============================================================================
 const UberVizFXShader = {
     uniforms: {
@@ -910,7 +939,12 @@ const UberVizFXShader = {
         }
     `,
     fragmentShader: `
-        precision highp float;
+        #ifdef GL_FRAGMENT_PRECISION_HIGH
+            precision highp float;
+        #else
+            precision mediump float;
+        #endif
+
         varying vec2 vUv;
         uniform sampler2D tDiffuse;
         uniform float u_time, u_bass, u_beat, u_shakeMode;
@@ -928,7 +962,8 @@ const UberVizFXShader = {
             else if (mode == 3) p = -abs(p);
             else if (mode == 4) {
                 float r = length(p);
-                float a = mod(atan(p.y, p.x), PI / 4.0);
+                float safeX = abs(p.x) < 0.0001 ? 0.0001 : p.x;
+                float a = mod(atan(p.y, safeX), PI / 4.0);
                 a = abs(a - PI / 8.0);
                 p = vec2(cos(a), sin(a)) * r;
             }
@@ -1020,7 +1055,7 @@ const UberVizFXShader = {
             float dCenter = length(vUv - 0.5);
             col *= smoothstep(0.95, 0.95 - u_vignette * 0.7, dCenter);
 
-            gl_FragColor = vec4(col, 1.0);
+            gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
         }
     `
 };
@@ -1135,7 +1170,8 @@ function applyEngineMode(modeName) {
 }
 
 function initGUI() {
-    gui = new dat.GUI({ autoPlace: true, width: 345 });
+    gui = new dat.GUI({ autoPlace: true, width: isMobile ? 260 : 345 });
+    if (isMobile) gui.close(); // На смартфоне панель свернута при старте, чтобы не закрывать экран
 
     const fMain = gui.addFolder('1. ГЛАВНЫЙ ПУЛЬТ & ТРЯСКА (F - Полный экран)');
     fMain.add({ fullscreen: toggleZenFullscreen }, 'fullscreen').name('⛶ ПОЛНЫЙ ЭКРАН (Скрыть UI)');
@@ -1169,7 +1205,7 @@ function initGUI() {
     }).name('Цветовая палитра').onChange(v => {
         bgUniforms.u_palette.value = Number(v);
     });
-    fMain.open();
+    if (!isMobile) fMain.open();
 
     const fViz = gui.addFolder('2. ÜBERVIZ 10 СЛОЕВ & ПРЕСЕТЫ');
     fViz.add(vizConfig, 'enable3DLayers').name('Включить 3D слои').listen();
@@ -1200,7 +1236,7 @@ function initGUI() {
     bindLayerToggle('stars',      '✨ Stars (Частицы)');
     bindLayerToggle('cyberWaves', '⛰️ CyberWaves (3D-слой)');
     bindLayerToggle('lightLeak',  '🌈 Light Leak (Засветы)');
-    fViz.open();
+    if (!isMobile) fViz.open();
 
     const fFX = gui.addFolder('3. FX RACK (Зеркала, Линза, Тряска)');
     fFX.add(fxConfig, 'mirrorMode', {
@@ -1227,7 +1263,6 @@ function initGUI() {
     fAudio.add(vizConfig, 'barsPerSwitch', 4, 32, 4).name('Битов до смены');
 }
 
-// Горячие клавиши: F или Q — полный экран без интерфейса, R — рандом, S — тряска
 window.addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
     if (k === 'f' || k === 'а' || k === 'q' || k === 'й') {
@@ -1250,9 +1285,10 @@ function initThree() {
     camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 3000);
     camera.position.set(0, 0, 600);
 
-    renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    renderer = new THREE.WebGLRenderer({ antialias: !isMobile, powerPreference: 'high-performance' });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    const maxPR = isMobile ? 1.25 : 2.0;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxPR));
 
     renderer.domElement.style.position = 'fixed';
     renderer.domElement.style.top = '0';
@@ -1323,7 +1359,12 @@ function updatePlaylistUI() {
         li.textContent = `${index + 1}. ${track.name}`;
         if (index === currentTrackIndex) li.classList.add('active');
         
+        // На телефонах нет двойного клика мышью — поддерживаем и одиночный тап на мобильных, и двойной клик на ПК
         li.addEventListener('dblclick', () => {
+            loadTrack(index);
+            playTrack();
+        });
+        li.addEventListener('touchend', () => {
             loadTrack(index);
             playTrack();
         });
@@ -1345,7 +1386,7 @@ function playTrack() {
     }
     if (!audio.src) return;
     initAudioContext();
-    audio.play();
+    audio.play().catch(() => {});
     isPlaying = true;
     btnPlay.textContent = '⏸';
 }
