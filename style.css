@@ -21,7 +21,7 @@ body, html {
     border: 1px solid rgba(0, 255, 255, 0.4);
     box-shadow: 0 20px 50px rgba(0,0,0,0.95);
     width: 340px;
-    max-height: 90vh;
+    max-height: 92vh;
     display: flex;
     flex-direction: column;
     transition: opacity 0.35s ease, transform 0.35s ease;
@@ -31,7 +31,7 @@ body, html {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
 }
 
 h1 {
@@ -59,13 +59,40 @@ h1 {
     box-shadow: 0 0 12px rgba(0, 255, 255, 0.5);
 }
 
+/* Статус активного аудио-источника */
+.source-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.78rem;
+    color: #b8eaff;
+    background: rgba(255, 255, 255, 0.05);
+    padding: 6px 10px;
+    border-radius: 6px;
+    margin-bottom: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: #666;
+    transition: 0.2s;
+}
+
+.status-dot.live {
+    background-color: #00ff88;
+    box-shadow: 0 0 10px #00ff88;
+}
+
 /* Панель dat.gui */
 .dg.ac {
     z-index: 1000 !important;
     transition: opacity 0.35s ease;
 }
 
-/* Плавающая кнопка полного экрана в правом нижнем углу */
+/* Плавающая кнопка полного экрана */
 #btn-zen-floating {
     position: fixed;
     bottom: 20px;
@@ -91,7 +118,6 @@ h1 {
     opacity: 1 !important;
 }
 
-/* Состояние полного погружения (скрывает плеер и настройки) */
 body.zen-mode #ui-container {
     opacity: 0;
     pointer-events: none;
@@ -112,12 +138,13 @@ body.zen-mode #btn-zen-floating {
     background: linear-gradient(135deg, #00ffff, #0044ff);
     color: #000;
     text-align: center;
-    padding: 10px;
+    padding: 9px;
     border-radius: 6px;
     font-weight: bold;
     cursor: pointer;
     transition: 0.2s;
-    margin-bottom: 12px;
+    margin-bottom: 8px;
+    font-size: 0.9rem;
 }
 
 .btn-upload:hover {
@@ -125,8 +152,53 @@ body.zen-mode #btn-zen-floating {
     transform: translateY(-1px);
 }
 
+/* Кнопки Микрофона и Системного звука ПК */
+.live-buttons-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.btn-live {
+    flex: 1;
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(0, 255, 255, 0.35);
+    color: #e0ffff;
+    padding: 8px 6px;
+    border-radius: 6px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: 0.2s;
+}
+
+.btn-live:hover {
+    background: rgba(0, 255, 255, 0.2);
+    border-color: #00ffff;
+}
+
+.btn-live.active {
+    background: linear-gradient(135deg, rgba(0, 255, 136, 0.28), rgba(0, 180, 255, 0.28));
+    border-color: #00ff88;
+    color: #00ff88;
+    box-shadow: 0 0 14px rgba(0, 255, 136, 0.45);
+}
+
+.device-select {
+    width: 100%;
+    background: rgba(12, 14, 24, 0.95);
+    color: #00ffff;
+    border: 1px solid rgba(0, 255, 255, 0.35);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 0.78rem;
+    margin-bottom: 10px;
+    outline: none;
+    cursor: pointer;
+}
+
 .seek-container {
-    margin-bottom: 12px;
+    margin-bottom: 10px;
 }
 
 #seek-bar {
@@ -146,7 +218,7 @@ body.zen-mode #btn-zen-floating {
     display: flex;
     justify-content: space-between;
     gap: 8px;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
 }
 
 .player-controls button {
@@ -154,7 +226,7 @@ body.zen-mode #btn-zen-floating {
     background: rgba(255, 255, 255, 0.08);
     border: 1px solid rgba(0, 255, 255, 0.4);
     color: #00ffff;
-    padding: 10px 0;
+    padding: 9px 0;
     border-radius: 6px;
     font-size: 1rem;
     cursor: pointer;
@@ -172,7 +244,7 @@ body.zen-mode #btn-zen-floating {
     gap: 10px;
     font-size: 0.85rem;
     color: #ccc;
-    margin-bottom: 15px;
+    margin-bottom: 12px;
 }
 
 #volume-bar {
@@ -184,20 +256,20 @@ body.zen-mode #btn-zen-floating {
 #playlist-container {
     flex-grow: 1;
     overflow-y: auto;
-    max-height: 190px;
+    max-height: 170px;
     border-top: 1px solid rgba(255, 255, 255, 0.1);
-    padding-top: 10px;
+    padding-top: 8px;
 }
 
 #playlist-container h3 {
-    font-size: 0.9rem;
+    font-size: 0.88rem;
     margin: 0 0 2px 0;
     color: #aaa;
 }
 
 .hint {
-    font-size: 0.75rem;
-    color: #555;
+    font-size: 0.72rem;
+    color: #666;
     margin: 0 0 8px 0;
 }
 
@@ -208,12 +280,12 @@ body.zen-mode #btn-zen-floating {
 }
 
 #playlist li {
-    padding: 8px 10px;
-    margin-bottom: 5px;
+    padding: 7px 10px;
+    margin-bottom: 4px;
     background: rgba(255, 255, 255, 0.04);
     border-radius: 4px;
     cursor: pointer;
-    font-size: 0.85rem;
+    font-size: 0.83rem;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -240,12 +312,12 @@ body.zen-mode #btn-zen-floating {
         left: 10px;
         right: 10px;
         width: auto;
-        max-height: 48vh;
+        max-height: 52vh;
         padding: 14px;
     }
 
     #playlist-container {
-        max-height: 90px;
+        max-height: 85px;
     }
 
     #btn-zen-floating {

@@ -14,13 +14,22 @@ const durationEl = document.getElementById('duration');
 
 const btnZenInline = document.getElementById('btn-zen-inline');
 const btnZenFloating = document.getElementById('btn-zen-floating');
+const btnMic = document.getElementById('btn-mic');
+const btnSysAudio = document.getElementById('btn-sys-audio');
+const micSelect = document.getElementById('mic-select');
+const statusDot = document.getElementById('status-dot');
+const statusText = document.getElementById('status-text');
 
-// Определяем мобильное устройство для оптимизации GPU
 const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
 
 let playlist = [];
 let currentTrackIndex = 0;
 let isPlaying = false;
+
+// Состояние Live-захвата (микрофон или системный звук ПК)
+let liveMode = 'none'; // 'none' | 'mic' | 'system'
+let liveStream = null;
+let liveStreamSource = null;
 
 // ============================================================================
 // УПРАВЛЕНИЕ ПОЛНОЭКРАННЫМ РЕЖИМОМ И СКРЫТИЕМ ИНТЕРФЕЙСА
@@ -65,9 +74,9 @@ document.addEventListener('webkitfullscreenchange', () => {
 });
 
 // ============================================================================
-// 1. АУДИО-ДВИЖОК (FFT + WAVEFORM DATA TEXTURE + BEAT DETECTOR ÜBERVIZ)
+// 1. АУДИО-ДВИЖОК (ПЛЕЙЛИСТ + МИКРОФОН + СИСТЕМНЫЙ ЗВУК ПК)
 // ============================================================================
-let audioCtx, analyser, source;
+let audioCtx, analyser, fileSource;
 let freqData, waveData, audioTextureData, audioTexture;
 const FFT_SIZE = 512;
 const BIN_COUNT = 256;
@@ -89,6 +98,195 @@ const audioState = {
     beatCounter: 0,
     audioTime: 0
 };
+
+function updateStatusUI(modeLabel, isActive) {
+    if (statusText) statusText.textContent = modeLabel;
+    if (statusDot) {
+        if (isActive) statusDot.classList.add('live');
+        else statusDot.classList.remove('live');
+    }
+    if (btnMic) btnMic.classList.toggle('active', liveMode === 'mic');
+    if (btnSysAudio) btnSysAudio.classList.toggle('active', liveMode === 'system');
+    if (micSelect) micSelect.style.display = (liveMode === 'mic' && micSelect.options.length > 0) ? 'block' : 'none';
+}
+
+function initAudioContext() {
+    if (!audioCtx) {
+        try {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            analyser = audioCtx.createAnalyser();
+            analyser.fftSize = FFT_SIZE;
+            analyser.smoothingTimeConstant = audioState.smoothing;
+
+            // Подключаем HTML5 <audio> плеер к анализатору И к колонкам (destination)
+            fileSource = audioCtx.createMediaElementSource(audio);
+            fileSource.connect(analyser);
+            fileSource.connect(audioCtx.destination);
+
+            freqData = new Uint8Array(BIN_COUNT);
+            waveData = new Uint8Array(BIN_COUNT);
+        } catch (err) {
+            console.error("Ошибка инициализации аудио:", err);
+        }
+    } else if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+    }
+}
+
+// Отключение активного микрофона или системного захвата
+function stopLiveStream() {
+    if (liveStreamSource) {
+        try { liveStreamSource.disconnect(); } catch (e) {}
+        liveStreamSource = null;
+    }
+    if (liveStream) {
+        liveStream.getTracks().forEach(track => track.stop());
+        liveStream = null;
+    }
+    liveMode = 'none';
+    updateStatusUI(isPlaying ? 'Источник: Плейлист (Играет)' : 'Источник: Плейлист (Ожидание)', isPlaying);
+}
+
+// Заполнение списка доступных микрофонов и «Стерео микшера»
+async function populateAudioDevices(selectedDeviceId) {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+    try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const audioInputs = devices.filter(d => d.kind === 'audioinput');
+        micSelect.innerHTML = '';
+        audioInputs.forEach((dev, idx) => {
+            const opt = document.createElement('option');
+            opt.value = dev.deviceId;
+            opt.textContent = dev.label || `Аудиовход #${idx + 1}`;
+            if (selectedDeviceId && dev.deviceId === selectedDeviceId) opt.selected = true;
+            micSelect.appendChild(opt);
+        });
+        if (liveMode === 'mic' && audioInputs.length > 0) {
+            micSelect.style.display = 'block';
+        }
+    } catch (e) {
+        console.warn("Не удалось получить список устройств:", e);
+    }
+}
+
+// Включение захвата с МИКРОФОНА (или Стерео микшера)
+async function startMicrophoneCapture(deviceId = null) {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        alert("Ваш браузер не поддерживает захват микрофона (getUserMedia).");
+        return;
+    }
+
+    try {
+        initAudioContext();
+        if (isPlaying) pauseTrack();
+        stopLiveStream();
+
+        const audioConstraints = {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false
+        };
+        if (deviceId) {
+            audioConstraints.deviceId = { exact: deviceId };
+        }
+
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints, video: false });
+        liveStream = stream;
+        liveMode = 'mic';
+
+        // Подключаем микрофон ТОЛЬКО к анализатору (не в destination, чтобы не было свиста/эха!)
+        liveStreamSource = audioCtx.createMediaStreamSource(stream);
+        liveStreamSource.connect(analyser);
+
+        const activeTrack = stream.getAudioTracks()[0];
+        const currentSettings = activeTrack && activeTrack.getSettings ? activeTrack.getSettings() : {};
+        await populateAudioDevices(currentSettings.deviceId || deviceId);
+
+        const label = (activeTrack && activeTrack.label) ? activeTrack.label : 'Микрофон';
+        updateStatusUI(`🎤 LIVE: ${label}`, true);
+
+        stream.getAudioTracks()[0].addEventListener('ended', () => {
+            if (liveMode === 'mic') stopLiveStream();
+        });
+    } catch (err) {
+        console.error("Ошибка доступа к микрофону:", err);
+        alert("Не удалось получить доступ к микрофону. Проверьте разрешения в браузере.");
+        stopLiveStream();
+    }
+}
+
+// Включение захвата СИСТЕМНОГО ЗВУКА ПК (Яндекс Музыка, плееры, браузер)
+async function startSystemAudioCapture() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+        alert("Захват системного звука через браузер поддерживается только на ПК (Chrome, Edge, Яндекс Браузер). На телефоне используйте кнопку «🎤 Микрофон».");
+        return;
+    }
+
+    try {
+        initAudioContext();
+        if (isPlaying) pauseTrack();
+        stopLiveStream();
+
+        // Запрашиваем захват экрана/вкладки с системным аудио без сжатия
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+            video: { width: 1, height: 1, frameRate: 1 },
+            audio: {
+                echoCancellation: false,
+                noiseSuppression: false,
+                autoGainControl: false,
+                suppressLocalAudioPlayback: false
+            }
+        });
+
+        const audioTracks = stream.getAudioTracks();
+        if (audioTracks.length === 0) {
+            stream.getTracks().forEach(t => t.stop());
+            alert("Вы не поставили галочку «Также предоставить доступ к аудио системы» (Share system audio) в окне выбора! Попробуйте еще раз и отметьте галочку звука внизу окна.");
+            return;
+        }
+
+        // Отключаем видеодорожку, чтобы не тратить ресурсы ПК, оставляя системный звук активным
+        stream.getVideoTracks().forEach(vTrack => {
+            vTrack.enabled = false;
+        });
+
+        liveStream = stream;
+        liveMode = 'system';
+
+        // Подключаем системный звук ТОЛЬКО к анализатору (чтобы звук не двоился в колонках)
+        liveStreamSource = audioCtx.createMediaStreamSource(stream);
+        liveStreamSource.connect(analyser);
+
+        updateStatusUI('🖥️ LIVE: Системный звук (Яндекс Музыка / ПК)', true);
+
+        audioTracks[0].addEventListener('ended', () => {
+            if (liveMode === 'system') stopLiveStream();
+        });
+    } catch (err) {
+        console.warn("Захват системного звука отменен:", err);
+        stopLiveStream();
+    }
+}
+
+if (btnMic) {
+    btnMic.addEventListener('click', () => {
+        if (liveMode === 'mic') stopLiveStream();
+        else startMicrophoneCapture();
+    });
+}
+
+if (btnSysAudio) {
+    btnSysAudio.addEventListener('click', () => {
+        if (liveMode === 'system') stopLiveStream();
+        else startSystemAudioCapture();
+    });
+}
+
+if (micSelect) {
+    micSelect.addEventListener('change', (e) => {
+        if (e.target.value) startMicrophoneCapture(e.target.value);
+    });
+}
 
 // ============================================================================
 // 2. ОБЪЕДИНЕННАЯ КОНФИГУРАЦИЯ (8 GLSL ШЕЙДЕРОВ + 10 СЛОЕВ ÜBERVIZ + FX RACK)
@@ -151,7 +349,6 @@ const fxConfig = {
     strobeOnBeat: false
 };
 
-// На мобильных уменьшаем число шагов реймарчинга, чтобы компилятор шейдеров не сбрасывал контекст
 const RAY_STEPS = isMobile ? 42 : 70;
 
 // ============================================================================
@@ -180,7 +377,6 @@ const backgroundGLSLFragment = `
     #define PI 3.14159265359
     #define STEPS ${RAY_STEPS}
 
-    // Безопасные функции для мобильных GPU (исключают появление NaN и черного экрана)
     float safeAtan(float y, float x) {
         return atan(y, abs(x) < 0.0001 ? 0.0001 : x);
     }
@@ -907,7 +1103,7 @@ function buildSceneAndLayers() {
 }
 
 // ============================================================================
-// 5. КАСКАД ПОСТ-ОБРАБОТКИ FX RACK (ЗАЩИТА ОТ NaN В KALEIDOSCOPE НА МОБИЛЬНЫХ)
+// 5. КАСКАД ПОСТ-ОБРАБОТКИ FX RACK
 // ============================================================================
 const UberVizFXShader = {
     uniforms: {
@@ -1171,10 +1367,12 @@ function applyEngineMode(modeName) {
 
 function initGUI() {
     gui = new dat.GUI({ autoPlace: true, width: isMobile ? 260 : 345 });
-    if (isMobile) gui.close(); // На смартфоне панель свернута при старте, чтобы не закрывать экран
+    if (isMobile) gui.close();
 
     const fMain = gui.addFolder('1. ГЛАВНЫЙ ПУЛЬТ & ТРЯСКА (F - Полный экран)');
     fMain.add({ fullscreen: toggleZenFullscreen }, 'fullscreen').name('⛶ ПОЛНЫЙ ЭКРАН (Скрыть UI)');
+    fMain.add({ mic: () => startMicrophoneCapture() }, 'mic').name('🎤 Включить Микрофон');
+    fMain.add({ sys: () => startSystemAudioCapture() }, 'sys').name('🖥️ Захват Звука ПК');
 
     fMain.add(vizConfig, 'enableShakeAndWobble').name('🔥 Тряска под бит (Точь-в-точь)').listen().onChange(v => {
         if (v && fxConfig.shakeAmount < 0.001) {
@@ -1258,7 +1456,7 @@ function initGUI() {
     fFX.add(fxConfig, 'strobeOnBeat').name('Strobe на пиках');
 
     const fAudio = gui.addFolder('4. АУДИО И ДЕТЕКТОР БИТА');
-    fAudio.add(audioState, 'gain', 0.4, 3.0, 0.05).name('Gain (Чувствительность)');
+    fAudio.add(audioState, 'gain', 0.4, 3.5, 0.05).name('Gain (Чувствительность)');
     fAudio.add(audioState, 'beatThreshold', 0.15, 0.7, 0.02).name('Beat Threshold');
     fAudio.add(vizConfig, 'barsPerSwitch', 4, 32, 4).name('Битов до смены');
 }
@@ -1359,7 +1557,6 @@ function updatePlaylistUI() {
         li.textContent = `${index + 1}. ${track.name}`;
         if (index === currentTrackIndex) li.classList.add('active');
         
-        // На телефонах нет двойного клика мышью — поддерживаем и одиночный тап на мобильных, и двойной клик на ПК
         li.addEventListener('dblclick', () => {
             loadTrack(index);
             playTrack();
@@ -1385,16 +1582,19 @@ function playTrack() {
         loadTrack(0);
     }
     if (!audio.src) return;
+    if (liveMode !== 'none') stopLiveStream();
     initAudioContext();
     audio.play().catch(() => {});
     isPlaying = true;
     btnPlay.textContent = '⏸';
+    updateStatusUI(`🎵 Играет: ${playlist[currentTrackIndex]?.name || 'Трек'}`, true);
 }
 
 function pauseTrack() {
     audio.pause();
     isPlaying = false;
     btnPlay.textContent = '▶';
+    if (liveMode === 'none') updateStatusUI('Источник: Плейлист (Пауза)', false);
 }
 
 function stopTrack() {
@@ -1402,6 +1602,7 @@ function stopTrack() {
     audio.currentTime = 0;
     isPlaying = false;
     btnPlay.textContent = '▶';
+    if (liveMode === 'none') updateStatusUI('Источник: Плейлист (Стоп)', false);
 }
 
 btnPlay.addEventListener('click', () => {
@@ -1457,45 +1658,19 @@ audio.addEventListener('ended', () => {
     }
 });
 
-function initAudioContext() {
-    if (!audioCtx) {
-        try {
-            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            analyser = audioCtx.createAnalyser();
-            analyser.fftSize = FFT_SIZE;
-            analyser.smoothingTimeConstant = audioState.smoothing;
-
-            source = audioCtx.createMediaElementSource(audio);
-            source.connect(analyser);
-            analyser.connect(audioCtx.destination);
-
-            freqData = new Uint8Array(BIN_COUNT);
-            waveData = new Uint8Array(BIN_COUNT);
-        } catch (err) {
-            console.error("Ошибка инициализации аудио:", err);
-        }
-    } else if (audioCtx.state === 'suspended') {
-        audioCtx.resume();
-    }
-}
-
 // ============================================================================
-// 9. ГЛАВНЫЙ ЦИКЛ ОБНОВЛЕНИЯ СЛОЕВ И ШЕЙДЕРОВ
+// 9. ГЛАВНЫЙ ЦИКЛ ОБНОВЛЕНИЯ СЛОЕВ И ШЕЙДЕРОВ (С АВТО-ПРОБУЖДЕНИЕМ ОТ ЗВУКА)
 // ============================================================================
 const clock = new THREE.Clock();
 initThree();
 animate();
 
 function updateAudioAnalysis(delta) {
-    if (analyser && freqData && isPlaying) {
+    const isAudioSourceActive = isPlaying || (liveMode !== 'none');
+
+    if (analyser && freqData && isAudioSourceActive) {
         analyser.getByteFrequencyData(freqData);
         analyser.getByteTimeDomainData(waveData);
-
-        for (let i = 0; i < 256; i++) {
-            audioTextureData[i] = freqData[i];
-            audioTextureData[256 + i] = waveData[i];
-        }
-        audioTexture.needsUpdate = true;
 
         let subSum = 0, bassSum = 0, midSum = 0, highSum = 0, totalSum = 0;
         for (let i = 0; i < 4; i++) subSum += freqData[i];
@@ -1504,45 +1679,67 @@ function updateAudioAnalysis(delta) {
         for (let i = 80; i < 200; i++) highSum += freqData[i];
         for (let i = 0; i < BIN_COUNT; i++) totalSum += freqData[i];
 
-        const g = audioState.gain;
-        const targetSub  = (subSum / 4 / 255) * g;
-        const targetBass = (bassSum / 10 / 255) * g;
-        const targetMid  = (midSum / 66 / 255) * g;
-        const targetHigh = (highSum / 120 / 255) * g;
-        const targetVol  = (totalSum / BIN_COUNT / 255) * g;
+        const rawAvg = totalSum / BIN_COUNT / 255;
 
-        audioState.sub    += (targetSub  - audioState.sub)  * 0.35;
-        audioState.bass   += (targetBass - audioState.bass) * 0.35;
-        audioState.mid    += (targetMid  - audioState.mid)  * 0.25;
-        audioState.high   += (targetHigh - audioState.high) * 0.25;
-        audioState.volume += (targetVol  - audioState.volume) * 0.25;
+        // Порог тишины (Noise Gate): если в Яндекс Музыке пауза или в комнате тихо,
+        // отсекаем фоновый микро-шум, чтобы картинка не дергалась
+        const isSilentSignal = (liveMode !== 'none' && rawAvg < 0.012);
 
-        if (audioState.volume > audioState.beatCutoff && audioState.volume > audioState.beatThreshold) {
-            audioState.beatPulse = 1.0;
-            audioState.beatCutoff = audioState.volume * 1.15;
-            audioState.beatFrames = 0;
-            audioState.beatCounter++;
-
-            if (audioState.beatCounter % vizConfig.barsPerSwitch === 0) {
-                if (vizConfig.autoSwitchGLSL && vizConfig.shaderMode < 8) {
-                    const nextShader = (Number(vizConfig.shaderMode) + 1) % 8;
-                    vizConfig.shaderMode = nextShader;
-                    bgUniforms.u_mode.value = nextShader;
-                    if (guiShaderModeCtrl) guiShaderModeCtrl.updateDisplay();
-                }
-                if (vizConfig.automaticUberViz && vizConfig.enable3DLayers) {
-                    randomizeUberViz();
-                }
+        if (!isSilentSignal) {
+            for (let i = 0; i < 256; i++) {
+                audioTextureData[i] = freqData[i];
+                audioTextureData[256 + i] = waveData[i];
             }
-        } else {
-            if (audioState.beatFrames <= audioState.beatHoldTime) {
-                audioState.beatFrames++;
+            audioTexture.needsUpdate = true;
+
+            const g = audioState.gain;
+            const targetSub  = (subSum / 4 / 255) * g;
+            const targetBass = (bassSum / 10 / 255) * g;
+            const targetMid  = (midSum / 66 / 255) * g;
+            const targetHigh = (highSum / 120 / 255) * g;
+            const targetVol  = rawAvg * g;
+
+            audioState.sub    += (targetSub  - audioState.sub)  * 0.35;
+            audioState.bass   += (targetBass - audioState.bass) * 0.35;
+            audioState.mid    += (targetMid  - audioState.mid)  * 0.25;
+            audioState.high   += (targetHigh - audioState.high) * 0.25;
+            audioState.volume += (targetVol  - audioState.volume) * 0.25;
+
+            if (audioState.volume > audioState.beatCutoff && audioState.volume > audioState.beatThreshold) {
+                audioState.beatPulse = 1.0;
+                audioState.beatCutoff = audioState.volume * 1.15;
+                audioState.beatFrames = 0;
+                audioState.beatCounter++;
+
+                if (audioState.beatCounter % vizConfig.barsPerSwitch === 0) {
+                    if (vizConfig.autoSwitchGLSL && vizConfig.shaderMode < 8) {
+                        const nextShader = (Number(vizConfig.shaderMode) + 1) % 8;
+                        vizConfig.shaderMode = nextShader;
+                        bgUniforms.u_mode.value = nextShader;
+                        if (guiShaderModeCtrl) guiShaderModeCtrl.updateDisplay();
+                    }
+                    if (vizConfig.automaticUberViz && vizConfig.enable3DLayers) {
+                        randomizeUberViz();
+                    }
+                }
             } else {
-                audioState.beatCutoff *= audioState.beatDecayRate;
-                audioState.beatCutoff = Math.max(audioState.beatCutoff, audioState.beatThreshold);
+                if (audioState.beatFrames <= audioState.beatHoldTime) {
+                    audioState.beatFrames++;
+                } else {
+                    audioState.beatCutoff *= audioState.beatDecayRate;
+                    audioState.beatCutoff = Math.max(audioState.beatCutoff, audioState.beatThreshold);
+                }
             }
+            audioState.beatPulse *= 0.86;
+        } else {
+            // Музыка в системе остановилась — плавно переходим в режим ожидания
+            audioState.sub    *= 0.90;
+            audioState.bass   *= 0.90;
+            audioState.mid    *= 0.90;
+            audioState.high   *= 0.90;
+            audioState.volume *= 0.90;
+            audioState.beatPulse *= 0.82;
         }
-        audioState.beatPulse *= 0.86;
     } else {
         audioState.sub    *= 0.90;
         audioState.bass   *= 0.90;
@@ -1572,6 +1769,7 @@ function animate() {
     const bass = audioState.bass;
     const mid = audioState.mid;
     const beat = audioState.beatPulse;
+    const hasActiveSignal = isPlaying || (liveMode !== 'none');
 
     if (bgUniforms) {
         bgUniforms.u_time.value = elapsed * vizConfig.speed;
@@ -1620,7 +1818,7 @@ function animate() {
 
                 for (let i = 0; i < segs; i++) {
                     const normX = i / (segs - 1) - 0.5;
-                    const waveVal = (waveData && isPlaying) ? ((waveData[i * 2] - 128) / 128) : 0;
+                    const waveVal = (waveData && hasActiveSignal) ? ((waveData[i * 2] - 128) / 128) : 0;
                     const n = noise3D(normX * 3.5, j * 0.22, t * 0.8);
                     posArr[i * 3]     = normX * 720;
                     posArr[i * 3 + 1] = yBase + n * 28 * (0.3 + mid);
@@ -1645,7 +1843,7 @@ function animate() {
 
             for (let i = 0; i < pos.length; i += 3) {
                 const bin = (i / 3) % 64;
-                const fVal = (freqData && isPlaying) ? (freqData[bin] / 255) : 0;
+                const fVal = (freqData && hasActiveSignal) ? (freqData[bin] / 255) : 0;
                 const spike = 1.0 + fVal * vizConfig.crystal.freakout * 0.85 + beat * 0.25;
                 pos[i]     = base[i] * spike;
                 pos[i + 1] = base[i + 1] * spike;
@@ -1670,7 +1868,7 @@ function animate() {
                 if (ring.position.z > 520) ring.position.z -= rings.length * 45;
 
                 const depthNorm = (ring.position.z + 1400) / 1920;
-                const fVal = (freqData && isPlaying) ? (freqData[(idx * 3) % 128] / 255) : 0;
+                const fVal = (freqData && hasActiveSignal) ? (freqData[(idx * 3) % 128] / 255) : 0;
                 const scale = 0.8 + fVal * 0.9 + bass * 0.35;
                 ring.scale.set(scale, scale, 1);
                 ring.rotation.z = idx * 0.12 * vizConfig.tunnel.twist + t * 0.4;
@@ -1684,7 +1882,7 @@ function animate() {
             const op = vizConfig.wheel.opacity;
             layers.wheel.rotation.z += delta * 0.35;
             layers.wheel.spokes.forEach((spoke, i) => {
-                const fVal = (freqData && isPlaying) ? (freqData[i * 2] / 255) : 0.1;
+                const fVal = (freqData && hasActiveSignal) ? (freqData[i * 2] / 255) : 0.1;
                 spoke.scale.y = 0.25 + fVal * 2.4 + bass * 0.5;
                 spoke.scale.x = 0.6 + fVal * 1.2;
                 spoke.material.opacity = op * (0.25 + fVal * 0.75);
@@ -1711,7 +1909,7 @@ function animate() {
             for (let s = 0; s < lines.length; s++) {
                 const arr = hist[s];
                 for (let k = arr.length - 1; k > 0; k--) arr[k] = arr[k - 1];
-                const binVal = (freqData && isPlaying) ? (freqData[s * 4] / 255) : 0;
+                const binVal = (freqData && hasActiveSignal) ? (freqData[s * 4] / 255) : 0;
                 arr[0] = binVal * vizConfig.strips.audioDepth * (0.6 + bass);
 
                 const line = lines[s];
@@ -1733,7 +1931,7 @@ function animate() {
         if (layers.bars.visible) {
             const op = vizConfig.bars.opacity;
             layers.bars.meshes.forEach((mesh, i) => {
-                const fVal = (freqData && isPlaying) ? (freqData[(i * 2) % 128] / 255) : 0.1;
+                const fVal = (freqData && hasActiveSignal) ? (freqData[(i * 2) % 128] / 255) : 0.1;
                 const z = ((mesh.userData.zOffset + t * 240) % 1200) - 700;
                 const radius = 240 + Math.sin(t + i) * 40;
                 mesh.position.set(Math.cos(mesh.userData.angle) * radius, Math.sin(mesh.userData.angle) * radius, z);
