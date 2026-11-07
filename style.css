@@ -7,6 +7,7 @@ body, html {
     background-color: #000;
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     color: #fff;
+    user-select: none;
 }
 
 #ui-container {
@@ -19,7 +20,7 @@ body, html {
     border-radius: 14px;
     backdrop-filter: blur(16px);
     border: 1px solid rgba(0, 255, 255, 0.4);
-    box-shadow: 0 20px 50px rgba(0,0,0,0.95);
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.95);
     width: 340px;
     max-height: 92vh;
     display: flex;
@@ -40,7 +41,7 @@ h1 {
     letter-spacing: 1.5px;
     color: #00ffff;
     text-transform: uppercase;
-    text-shadow: 0 0 12px rgba(0,255,255,0.7);
+    text-shadow: 0 0 12px rgba(0, 255, 255, 0.7);
 }
 
 .btn-zen-small {
@@ -78,6 +79,7 @@ h1 {
     height: 8px;
     border-radius: 50%;
     background-color: #666;
+    flex-shrink: 0;
     transition: 0.2s;
 }
 
@@ -86,13 +88,13 @@ h1 {
     box-shadow: 0 0 10px #00ff88;
 }
 
-/* Панель dat.gui */
+/* Панель dat.gui поверх холста */
 .dg.ac {
     z-index: 1000 !important;
     transition: opacity 0.35s ease;
 }
 
-/* Плавающая кнопка полного экрана */
+/* Плавающая кнопка полного экрана в правом нижнем углу */
 #btn-zen-floating {
     position: fixed;
     bottom: 20px;
@@ -108,16 +110,18 @@ h1 {
     cursor: pointer;
     backdrop-filter: blur(10px);
     box-shadow: 0 8px 25px rgba(0, 0, 0, 0.7);
-    transition: opacity 0.3s ease, transform 0.2s ease, background 0.2s ease;
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 0.4s ease, visibility 0.4s ease, transform 0.2s ease, background 0.2s ease;
 }
 
 #btn-zen-floating:hover {
     background: rgba(0, 255, 255, 0.25);
     box-shadow: 0 0 18px rgba(0, 255, 255, 0.6);
     transform: translateY(-2px);
-    opacity: 1 !important;
 }
 
+/* Скрытие панелей в режиме полного погружения (Zen Mode) */
 body.zen-mode #ui-container {
     opacity: 0;
     pointer-events: none;
@@ -129,10 +133,30 @@ body.zen-mode .dg.ac {
     pointer-events: none;
 }
 
+/* Когда мышка двигается в полном экране — кнопка видна */
 body.zen-mode #btn-zen-floating {
-    opacity: 0.15;
+    opacity: 0.85;
+    visibility: visible;
+    pointer-events: auto;
 }
 
+/* Когда мышка неактивна (2.4 сек) в полном экране — кнопка и курсор ПОЛНОСТЬЮ исчезают */
+body.zen-mode.user-idle {
+    cursor: none !important;
+}
+
+body.zen-mode.user-idle * {
+    cursor: none !important;
+}
+
+body.zen-mode.user-idle #btn-zen-floating {
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+    transform: translateY(10px);
+}
+
+/* Кнопка добавления треков */
 .btn-upload {
     display: block;
     background: linear-gradient(135deg, #00ffff, #0044ff);
@@ -197,6 +221,7 @@ body.zen-mode #btn-zen-floating {
     cursor: pointer;
 }
 
+/* Полоса перемотки */
 .seek-container {
     margin-bottom: 10px;
 }
@@ -214,6 +239,7 @@ body.zen-mode #btn-zen-floating {
     color: #888;
 }
 
+/* Кнопки управления плеером */
 .player-controls {
     display: flex;
     justify-content: space-between;
@@ -238,6 +264,11 @@ body.zen-mode #btn-zen-floating {
     box-shadow: 0 0 15px rgba(0, 255, 255, 0.6);
 }
 
+.player-controls button:active {
+    transform: scale(0.96);
+}
+
+/* Ползунок громкости */
 .volume-container {
     display: flex;
     align-items: center;
@@ -253,12 +284,27 @@ body.zen-mode #btn-zen-floating {
     cursor: pointer;
 }
 
+/* Список воспроизведения */
 #playlist-container {
     flex-grow: 1;
     overflow-y: auto;
     max-height: 170px;
     border-top: 1px solid rgba(255, 255, 255, 0.1);
     padding-top: 8px;
+}
+
+#playlist-container::-webkit-scrollbar {
+    width: 6px;
+}
+
+#playlist-container::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 3px;
+}
+
+#playlist-container::-webkit-scrollbar-thumb {
+    background: rgba(0, 255, 255, 0.35);
+    border-radius: 3px;
 }
 
 #playlist-container h3 {
@@ -304,7 +350,7 @@ body.zen-mode #btn-zen-floating {
     font-weight: bold;
 }
 
-/* Адаптация под мобильные телефоны */
+/* Адаптация под мобильные экраны */
 @media (max-width: 768px) {
     #ui-container {
         top: auto;
