@@ -24,7 +24,7 @@
             <button id="btn-zen-inline" class="btn-zen-small" title="Скрыть интерфейс и развернуть на весь экран (F)">⛶ На весь экран</button>
         </div>
 
-        <!-- Индикатор активного источника звука -->
+        <!-- Индикатор активного источника звука и авто-BPM -->
         <div id="source-status" class="source-status">
             <span class="status-dot" id="status-dot"></span>
             <span id="status-text">Источник: Плейлист (Ожидание)</span>
@@ -39,7 +39,6 @@
                 <button id="btn-sys-audio" class="btn-live" title="Захват системного звука ПК (Яндекс Музыка, плееры, вкладки)">🖥️ Звук ПК</button>
             </div>
 
-            <!-- Выпадающий список микрофонов / Стерео микшера Windows -->
             <select id="mic-select" class="device-select" style="display: none;" title="Выберите микрофон или Стерео микшер"></select>
         </div>
 
@@ -72,11 +71,15 @@
         </div>
     </div>
 
-    <!-- Плавающая кнопка входа/выхода из полноэкранного режима (исчезает при бездействии мыши) -->
     <button id="btn-zen-floating" title="Переключить полноэкранный режим и скрыть интерфейс (F)">
         ⛶ Полный экран (Скрыть UI)
     </button>
 
+    <!-- Модульная архитектура из 5 файлов -->
+    <script src="config.js"></script>
+    <script src="shaders.js"></script>
+    <script src="layers3d.js"></script>
+    <script src="audio.js"></script>
     <script src="app.js"></script>
 </body>
 </html>
